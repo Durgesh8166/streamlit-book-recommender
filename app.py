@@ -1,7 +1,14 @@
 import pickle
 import streamlit as st
 import numpy as np
-import speech_recognition as sr
+import os
+
+# Check if deployed
+IS_DEPLOYED = os.getenv("STREAMLIT_SERVER_HEADLESS") == "1"
+
+# Import speech_recognition only if not deployed
+if not IS_DEPLOYED:
+    import speech_recognition as sr
 
 # Load models and data
 model = pickle.load(open('model.pkl', 'rb')) 
@@ -80,9 +87,14 @@ raw_input = ""
 
 if search_option == "Type Book Name":
     raw_input = st.selectbox("Select a book:", book_names)
+
 elif search_option == "Use Voice Search":
-    if st.button("🎤 Start Listening"):
-        raw_input = recognize_speech()
+    if IS_DEPLOYED:
+        st.warning("🎤 Voice Search is not available in the deployed app.")
+        raw_input = ""
+    else:
+        if st.button("🎤 Start Listening"):
+            raw_input = recognize_speech()
 
 # ----------- Run Recommendation -----------
 if raw_input:
