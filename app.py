@@ -1,19 +1,19 @@
 import pickle
 import streamlit as st
 import numpy as np
+import requests
 import os
 
-# Check if deployed
-
-# Load models and data
-model = pickle.load(open('model.pkl', 'rb')) 
+# Load local models and data
+model = pickle.load(open('model.pkl', 'rb'))
 book_names = pickle.load(open('book_names.pkl', 'rb'))
 book_pivot = pickle.load(open('book_pivot.pkl', 'rb'))
 final_rating = pickle.load(open('final_rating.pkl', 'rb'))
 
 st.set_page_config(page_title="Book Recommendation System", page_icon="📚", layout="wide")
 st.title("📚 Book Recommendation System")
-st.write("Welcome! This app recommends books based on your input. Use typing or voice search.")
+
+st.write("Welcome! This app recommends books based on your input. Results are shown from both our system and Google Books.")
 
 # ----------- Case-insensitive title matcher -----------
 def get_closest_title(book_input):
@@ -22,32 +22,33 @@ def get_closest_title(book_input):
             return title
     return None
 
-# ----------- Voice input -----------
-'''def recognize_speech():
-    recognizer = sr.Recognizer()
-    try:
-        mic = sr.Microphone()
-        with mic as source:
-            st.write("🎙️ Listening... Please say a book name.")
-            recognizer.adjust_for_ambient_noise(source)
-            audio = recognizer.listen(source, timeout=5)
-        text = recognizer.recognize_google(audio)
-        st.write(f"🗣️ You said: `{text}`")
-        return text
-    except sr.UnknownValueError:
-        st.error("❌ Could not understand audio.")
-    except sr.RequestError:
-        st.error("❌ Google speech recognition service failed.")
-    except Exception as e:
-        st.error(f"🎤 Mic error: {e}")
-    return ""'''
+# ----------- Google Books API fetch function -----------
+def fetch_books_api(book_name, api_key=None):
+    url = f"https://www.googleapis.com/books/v1/volumes?q=intitle:{book_name}"
+    if api_key:
+        url += f"&key={api_key}"
+    resp = requests.get(url)
+    results = []
+    if resp.status_code == 200:
+        data = resp.json()
+        for item in data.get("items", []):
+            info = item["volumeInfo"]
+            results.append({
+                "title": info.get("title", ""),
+                "authors": ", ".join(info.get("authors", [])),
+                "publisher": info.get("publisher", ""),
+                "year": info.get("publishedDate", ""),
+                "img_url": info.get("imageLinks", {}).get("thumbnail", ""),
+                "description": info.get("description", "")
+            })
+    return results
 
 # ----------- Recommendation logic -----------
 def recommend_book(book_name):
     try:
         book_id = np.where(book_pivot.index == book_name)[0][0]
         distances, suggestions = model.kneighbors(book_pivot.iloc[book_id, :].values.reshape(1, -1), n_neighbors=6)
-        
+
         # Book Info
         book_info = final_rating[final_rating['title'] == book_name].iloc[0]
         st.markdown(f"🔍 You searched for: **{book_name}**")
@@ -55,7 +56,7 @@ def recommend_book(book_name):
         st.write(f"**Author:** {book_info['author']}")
         st.write(f"**Publisher:** {book_info['publisher']}")
         st.write(f"**Year:** {book_info['year']}")
-        
+
         # Recommendations
         st.markdown("### 📚 You might also like:")
         cols = st.columns(5)
@@ -79,22 +80,33 @@ def recommend_book(book_name):
 # ----------- UI Input Options -----------
 search_option = st.radio("Choose input method:", ("Type Book Name"))
 raw_input = ""
-
 if search_option == "Type Book Name":
     raw_input = st.selectbox("Select a book:", book_names)
 
-''elif search_option == "Use Voice Search":
-    if IS_DEPLOYED:
-        st.warning("🎤 Voice Search is not available in the deployed app.")
-        raw_input = ""
-    else:
-        if st.button("🎤 Start Listening"):
-            raw_input = recognize_speech()'''
-
-# ----------- Run Recommendation -----------
+# ----------- Run Recommendation and API Fetch -----------
 if raw_input:
     matched_title = get_closest_title(raw_input)
     if matched_title:
-        recommend_book(matched_title)
+        tab1, tab2 = st.tabs(["Our Recommendations", "Google Books Results"])
+        with tab1:
+            recommend_book(matched_title)
+        with tab2:
+            api_books = fetch_books_api(matched_title)
+            if api_books:
+                st.markdown("### 🔎 Google Books Results")
+                for book in api_books[:5]:  # Show up to 5 results
+                    if book['img_url']:  # Check image URL before displaying
+                        st.image(book['img_url'], width=100)
+                    else:
+                        st.write("[No Image Available]")
+                    st.markdown(f"**{book['title']}**")
+                    st.write(f"**Authors:** {book['authors']}")
+                    st.write(f"**Publisher:** {book['publisher']}")
+                    st.write(f"**Year:** {book['year']}")
+                    if book['description']:
+                        st.write(f"*{book['description'][:300]}...*")
+                    st.markdown("---")
+            else:
+                st.warning("No results found in Google Books API.")
     else:
         st.warning(f"No match found for: '{raw_input}'. Please try again.")
